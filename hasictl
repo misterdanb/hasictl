@@ -1,0 +1,67 @@
+#!/usr/bin/python3
+import paho.mqtt.client as mqtt
+import time
+import sys
+import threading
+
+client = mqtt.Client()
+
+device_topic = sys.argv[1]
+data_types = {}
+
+initial_topics_received = False
+initial_help_received = False
+
+def on_message(client, userdata, msg):
+    global device_topic, data_types, initial_topics_received, initial_help_received
+
+    if msg.topic == device_topic + "/topics/response":
+        if not initial_topics_received:
+            topics = list(map(lambda x: x.split(":"), str(msg.payload, "utf-8").split(",")))
+
+            for topic, data_type in topics:
+                data_types[device_topic + "/" + topic + "/response"] = data_type
+                print(device_topic + "/" + topic + "/response")
+                client.subscribe(device_topic + "/" + topic + "/response")
+
+            client.publish(device_topic + "/help", "get")
+
+            initial_topics_received = True
+    else:
+        if msg.topic == device_topic + "/help/response":
+            initial_help_received = True
+
+        if data_types[msg.topic] == "string":
+            print(msg.payload.decode("utf-8"))
+
+client.on_message = on_message
+
+client.connect("atlas", 1883)
+client.subscribe(device_topic + "/help/response")
+client.subscribe(device_topic + "/topics/response")
+
+client.publish(device_topic + "/topics", "get")
+
+def input_thread():
+    while True:
+        if initial_help_received:
+            topic = device_topic + "/" + str(input("Topic: "))
+            value = str(input("Value: "))
+            client.publish(topic, value)
+
+        time.sleep(0.5)
+
+thread_a = threading.Thread(target=input_thread)
+thread_a.daemon = True
+
+thread_b = threading.Thread(target=client.loop_forever)
+thread_b.daemon = True
+
+thread_a.start()
+thread_b.start()
+
+while True:
+    try:
+        time.sleep(1)
+    except KeyboardInterrupt:
+        exit(0)
